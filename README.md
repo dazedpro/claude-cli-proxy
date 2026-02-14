@@ -1,12 +1,17 @@
 # claude-cli-proxy
 
-An HTTP proxy server that routes LLM requests through the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code), providing priority queuing, concurrency management, structured logging, and metrics.
+**Use your Claude Pro/Max subscription instead of paying for API calls.**
 
-Built for environments where multiple services (Docker containers, microservices, background workers) need to share a single Claude CLI installation on the host machine.
+An HTTP proxy that lets any service call Claude through the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) via a simple REST API. Your existing Claude subscription covers the usage — no API keys, no per-token billing, no Anthropic API account needed.
+
+Replace `fetch('https://api.anthropic.com/v1/messages', ...)` with `fetch('http://localhost:9100/chat', ...)` and stop paying per token.
 
 ## Why?
 
-The Claude CLI authenticates via tokens stored in `~/.claude/` on the host. Containerized services can't easily access these credentials. This proxy runs on the host and exposes a simple HTTP API that any service can call — no credential sharing, no CLI installation per container.
+Anthropic's API charges per token. But if you have a Claude Pro ($20/mo) or Max ($100-200/mo) subscription, the Claude Code CLI gives you included usage at no extra cost. This proxy turns that CLI into an HTTP service that any app, container, or script can call — with priority queuing, concurrency management, and structured logging built in.
+
+**Before:** Each API call costs money. 100K input tokens + 20K output tokens on Opus = ~$18.
+**After:** Same call, $0. It runs through your subscription.
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌───────────┐
