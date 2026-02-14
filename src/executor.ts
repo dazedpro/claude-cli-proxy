@@ -18,10 +18,15 @@ export async function executeClaudeCli(
   timeoutMs: number,
   _config: ProxyConfig,
 ): Promise<ExecutionResult> {
+  const env = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
+  delete env.CLAUDECODE;
+  delete env.CLAUDE_CODE_TASK_LIST_ID;
+  delete env.CLAUDE_CODE_ENTRYPOINT;
+
   const proc = Bun.spawn([CLI_COMMAND, ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDECODE: undefined },
+    env,
   });
 
   let killed = false;

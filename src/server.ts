@@ -104,6 +104,7 @@ Bun.serve({
       return Response.json(formatMessagesResponse(internalBody, requestModel));
     }
 
+    log('warn', null, 'NOT_FOUND', { method: req.method, path: url.pathname });
     return Response.json({ error: 'Not found' }, { status: 404 });
   },
 });
