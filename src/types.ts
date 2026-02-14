@@ -88,6 +88,7 @@ export interface ProxyConfig {
   defaultMaxTurns: number;
   defaultTimeoutMs: number;
   proxyApiKey: string | undefined;
+  permissionMode: string;
 }
 
 export function loadConfig(): ProxyConfig {
@@ -96,8 +97,9 @@ export function loadConfig(): ProxyConfig {
     maxConcurrent: Number(process.env.MAX_CONCURRENT ?? 5),
     maxQueueDepth: Number(process.env.MAX_QUEUE_DEPTH ?? 20),
     queueTimeoutMs: Number(process.env.QUEUE_TIMEOUT_MS ?? 60_000),
-    defaultMaxTurns: 2,
-    defaultTimeoutMs: 180_000,
+    defaultMaxTurns: Number(process.env.DEFAULT_MAX_TURNS ?? 100),
+    defaultTimeoutMs: Number(process.env.DEFAULT_TIMEOUT_MS ?? 600_000),
     proxyApiKey: process.env.PROXY_API_KEY || undefined,
+    permissionMode: process.env.PERMISSION_MODE ?? 'default',
   };
 }

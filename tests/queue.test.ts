@@ -10,6 +10,7 @@ const TEST_CONFIG: ProxyConfig = {
   queueTimeoutMs: 5_000,
   defaultMaxTurns: 2,
   defaultTimeoutMs: 30_000,
+  permissionMode: 'default',
 };
 
 function mockExecutor(result: Partial<ExecutionResult> & { delay?: number } = {}): typeof import('../src/executor').executeClaudeCli {
@@ -218,6 +219,32 @@ describe('JSON output parsing', () => {
 
     expect(response.status).toBe(200);
     expect(body.text).toBe('assistant reply');
+  });
+
+  it('detects error_max_turns subtype (single object)', async () => {
+    _setExecutor(mockExecutor({
+      stdout: JSON.stringify({ type: 'result', subtype: 'error_max_turns', session_id: 'abc' }),
+    }));
+
+    const response = await enqueue({ prompt: 'complex' }, TEST_CONFIG);
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toContain('max turns');
+  });
+
+  it('detects error_max_turns subtype (inside array)', async () => {
+    const arrayOutput = [
+      { type: 'assistant', text: 'partial work...' },
+      { type: 'result', subtype: 'error_max_turns', session_id: 'abc' },
+    ];
+    _setExecutor(mockExecutor({ stdout: JSON.stringify(arrayOutput) }));
+
+    const response = await enqueue({ prompt: 'complex' }, TEST_CONFIG);
+    const body = await response.json();
+
+    expect(response.status).toBe(422);
+    expect(body.error).toContain('max turns');
   });
 });
 

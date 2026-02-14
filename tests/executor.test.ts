@@ -9,6 +9,7 @@ const TEST_CONFIG: ProxyConfig = {
   queueTimeoutMs: 60_000,
   defaultMaxTurns: 2,
   defaultTimeoutMs: 180_000,
+  permissionMode: 'default',
 };
 
 afterEach(() => {
