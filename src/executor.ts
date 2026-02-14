@@ -18,7 +18,7 @@ export async function executeClaudeCli(
   timeoutMs: number,
   _config: ProxyConfig,
 ): Promise<ExecutionResult> {
-  const env = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
+  const env: Record<string, string | undefined> = { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' };
   delete env.CLAUDECODE;
   delete env.CLAUDE_CODE_TASK_LIST_ID;
   delete env.CLAUDE_CODE_ENTRYPOINT;
