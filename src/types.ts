@@ -87,6 +87,7 @@ export interface ProxyConfig {
   queueTimeoutMs: number;
   defaultMaxTurns: number;
   defaultTimeoutMs: number;
+  proxyApiKey: string | undefined;
 }
 
 export function loadConfig(): ProxyConfig {
@@ -97,5 +98,6 @@ export function loadConfig(): ProxyConfig {
     queueTimeoutMs: Number(process.env.QUEUE_TIMEOUT_MS ?? 60_000),
     defaultMaxTurns: 2,
     defaultTimeoutMs: 180_000,
+    proxyApiKey: process.env.PROXY_API_KEY || undefined,
   };
 }

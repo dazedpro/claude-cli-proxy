@@ -4,7 +4,7 @@
 
 An HTTP proxy that lets any service call Claude through the [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) via a simple REST API. Your existing Claude subscription covers the usage — no API keys, no per-token billing, no Anthropic API account needed.
 
-Replace `fetch('https://api.anthropic.com/v1/messages', ...)` with `fetch('http://localhost:9100/chat', ...)` and stop paying per token.
+Replace `fetch('https://api.anthropic.com/v1/messages', ...)` with `fetch('http://localhost:9100/v1/messages', ...)` and stop paying per token. Existing code using the Anthropic SDK can switch by changing **one env var** — zero code changes.
 
 ## Why?
 
@@ -28,11 +28,14 @@ Docker containers reach the proxy via `host.docker.internal:9100`.
 
 ## Features
 
+- **Anthropic API Compatible** — drop-in `/v1/messages` endpoint; switch with one env var
 - **Priority Queue** — HIGH / NORMAL / LOW priorities with FIFO ordering within each level
 - **Concurrency Control** — configurable max parallel CLI processes (default: 5)
 - **Queue Depth Limiting** — bounded queue with configurable max depth (default: 20)
 - **Queue Timeouts** — requests waiting too long are rejected with 408
 - **Per-Request Timeouts** — processes killed after configurable timeout (default: 180s)
+- **Optional API Key Auth** — set `PROXY_API_KEY` to secure shared/exposed proxies
+- **Streaming Support** — `stream: true` returns proper SSE event format
 - **Structured JSON Logging** — one JSON line per event for easy parsing
 - **Metrics Endpoint** — request counts, token usage, latency percentiles
 - **Health Check** — quick status for load balancers and monitoring
@@ -64,11 +67,116 @@ pm2 start ecosystem.config.cjs
 
 The server starts on port **9100** by default.
 
+## Using with the Anthropic SDK (Drop-in Replacement)
+
+The `/v1/messages` endpoint accepts the exact same request/response format as `api.anthropic.com`. Existing code using the Anthropic SDK works with **zero code changes** — just set env vars.
+
+### Zero-code-change method (recommended)
+
+```bash
+# The Anthropic SDK reads these automatically
+export ANTHROPIC_BASE_URL=http://localhost:9100
+export ANTHROPIC_API_KEY=dummy  # required by SDK but not checked unless PROXY_API_KEY is set
+
+# In Docker Compose:
+environment:
+  ANTHROPIC_BASE_URL: http://host.docker.internal:9100
+  ANTHROPIC_API_KEY: dummy
+```
+
+### One-line-change method
+
+```python
+# Python
+import anthropic
+client = anthropic.Anthropic(base_url="http://localhost:9100", api_key="dummy")
+response = client.messages.create(
+    model="claude-sonnet-4-5-20250929",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Hello!"}]
+)
+```
+
+```typescript
+// TypeScript
+import Anthropic from "@anthropic-ai/sdk";
+const client = new Anthropic({ baseURL: "http://localhost:9100", apiKey: "dummy" });
+const response = await client.messages.create({
+  model: "claude-sonnet-4-5-20250929",
+  max_tokens: 1024,
+  messages: [{ role: "user", content: "Hello!" }],
+});
+```
+
+### Secured mode (shared/exposed proxy)
+
+```bash
+# On the proxy host:
+PROXY_API_KEY=my-secret-key pm2 restart claude-cli-proxy
+
+# Clients use the key as their "API key":
+export ANTHROPIC_BASE_URL=http://proxy-host:9100
+export ANTHROPIC_API_KEY=my-secret-key
+```
+
+### Limitations
+
+- **No image/vision content blocks** — text only (image blocks return a clear error)
+- **No tool_use/tool_choice** — the CLI handles tools internally
+- **Sampling params accepted but ignored** — `temperature`, `top_p`, `top_k`, `max_tokens` are accepted for compatibility but the CLI controls these
+- **Fake streaming** — `stream: true` returns proper SSE event format, but the full response is delivered at once (not token-by-token)
+- **Model mapping** — full model IDs (e.g. `claude-sonnet-4-5-20250929`) are mapped to CLI short names (`sonnet`). Short names also work directly.
+
 ## API
 
-### POST /chat
+### POST /v1/messages (Anthropic-compatible)
 
-Send a prompt to Claude and get a response.
+Standard Anthropic Messages API format. See [Anthropic API docs](https://docs.anthropic.com/en/api/messages).
+
+**Request:**
+
+```json
+{
+  "model": "claude-sonnet-4-5-20250929",
+  "max_tokens": 1024,
+  "system": "You are a helpful assistant.",
+  "messages": [
+    {"role": "user", "content": "What is the capital of France?"}
+  ]
+}
+```
+
+**Response (200):**
+
+```json
+{
+  "id": "msg_01XFDUDYJgAACzvnptvVoYEL",
+  "type": "message",
+  "role": "assistant",
+  "content": [{"type": "text", "text": "The capital of France is Paris."}],
+  "model": "claude-sonnet-4-5-20250929",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {"input_tokens": 25, "output_tokens": 12}
+}
+```
+
+**Error (4xx/5xx):**
+
+```json
+{
+  "type": "error",
+  "error": {"type": "invalid_request_error", "message": "messages array is required and must not be empty"}
+}
+```
+
+**Streaming (`stream: true`):**
+
+Returns `text/event-stream` with standard Anthropic SSE events: `message_start` → `content_block_start` → `content_block_delta` → `content_block_stop` → `message_delta` → `message_stop`.
+
+### POST /chat (Simple endpoint)
+
+Send a prompt to Claude and get a response. Simpler than the Messages API but not SDK-compatible.
 
 **Request:**
 
@@ -169,6 +277,8 @@ Requests are processed by priority (HIGH before NORMAL before LOW), with FIFO or
 
 When a slot opens up, the highest-priority queued request is processed next. If the queue is full, new requests are rejected with 503.
 
+Note: The `/v1/messages` endpoint uses `normal` priority by default. Use the `/chat` endpoint if you need priority control.
+
 ## Configuration
 
 All settings are configurable via environment variables:
@@ -179,8 +289,9 @@ All settings are configurable via environment variables:
 | `MAX_CONCURRENT` | `5` | Max parallel Claude CLI processes |
 | `MAX_QUEUE_DEPTH` | `20` | Max requests waiting in queue |
 | `QUEUE_TIMEOUT_MS` | `60000` | Max time a request can wait in queue (ms) |
+| `PROXY_API_KEY` | *(unset)* | If set, requires `x-api-key` header to match on `/v1/messages` |
 
-Default per-request settings (overridable per request):
+Default per-request settings (overridable per request via `/chat`):
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -229,7 +340,26 @@ All log output is structured JSON, one line per event:
 | `PROC_FAIL` | error | Claude CLI exited with non-zero code |
 | `ERR` | error | Unexpected error during execution |
 
-## Client Example
+## Client Examples
+
+### Using the Anthropic SDK (recommended)
+
+```python
+import anthropic
+import os
+
+os.environ["ANTHROPIC_BASE_URL"] = "http://localhost:9100"
+client = anthropic.Anthropic(api_key="dummy")
+
+response = client.messages.create(
+    model="claude-sonnet-4-5-20250929",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Write a haiku about coding"}]
+)
+print(response.content[0].text)
+```
+
+### Using the simple /chat endpoint
 
 ```typescript
 const response = await fetch('http://localhost:9100/chat', {
@@ -275,7 +405,8 @@ bun run typecheck
 
 ```
 src/
-├── server.ts     # HTTP routing (Bun.serve)
+├── server.ts     # HTTP routing (Bun.serve) — /chat, /v1/messages, /health, /metrics
+├── compat.ts     # Anthropic API format translation (request/response/streaming/errors)
 ├── queue.ts      # Priority queue, concurrency manager, request execution
 ├── executor.ts   # CLI process spawning (thin wrapper around Bun.spawn)
 ├── log.ts        # Structured JSON logger

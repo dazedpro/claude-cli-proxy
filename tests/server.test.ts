@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach } from 'bun:test';
 import { _setExecutor, _resetExecutor, _resetState } from '../src/queue';
+import type { ProxyResponse } from '../src/types';
 
 // Start the server on a test port
 const TEST_PORT = 9199;
@@ -15,9 +16,15 @@ beforeAll(async () => {
     killed: false,
   }));
 
-  // Dynamically import server module (it calls Bun.serve on load)
+  // Dynamically import modules
   const { loadConfig } = await import('../src/types');
   const { enqueue, getMetrics, getActive, getQueued } = await import('../src/queue');
+  const {
+    parseMessagesRequest,
+    formatMessagesResponse,
+    formatErrorResponse,
+    formatStreamingResponse,
+  } = await import('../src/compat');
 
   const config = loadConfig();
 
@@ -54,6 +61,49 @@ beforeAll(async () => {
         return enqueue(body, config);
       }
 
+      if (url.pathname === '/v1/messages' && req.method === 'POST') {
+        // Auth check
+        if (config.proxyApiKey) {
+          const apiKey = req.headers.get('x-api-key');
+          if (apiKey !== config.proxyApiKey) {
+            return formatErrorResponse(
+              'authentication_error',
+              'Invalid API key. Set the x-api-key header to match PROXY_API_KEY.',
+              401,
+            );
+          }
+        }
+
+        let body: any;
+        try {
+          body = await req.json();
+        } catch {
+          return formatErrorResponse('invalid_request_error', 'Invalid JSON body', 400);
+        }
+
+        const parsed = parseMessagesRequest(body);
+        if ('error' in parsed) {
+          return formatErrorResponse('invalid_request_error', parsed.error, 400);
+        }
+
+        const { proxyReq, stream } = parsed;
+        const requestModel = body.model;
+
+        const internalRes = await enqueue(proxyReq, config);
+        const internalBody = (await internalRes.clone().json()) as ProxyResponse & { error?: string };
+
+        if (internalRes.status !== 200) {
+          const errorType = internalRes.status === 503 ? 'overloaded_error' as const : 'api_error' as const;
+          return formatErrorResponse(errorType, internalBody.error || 'Internal error', internalRes.status);
+        }
+
+        if (stream) {
+          return formatStreamingResponse(internalBody, requestModel);
+        }
+
+        return Response.json(formatMessagesResponse(internalBody, requestModel));
+      }
+
       return Response.json({ error: 'Not found' }, { status: 404 });
     },
   });
@@ -62,6 +112,7 @@ beforeAll(async () => {
 afterAll(() => {
   server?.stop();
   delete process.env.CLAUDE_PROXY_PORT;
+  delete process.env.PROXY_API_KEY;
   _resetExecutor();
 });
 
@@ -70,6 +121,10 @@ beforeEach(() => {
 });
 
 const base = `http://localhost:${TEST_PORT}`;
+
+// ============================================================================
+// Original endpoints (backward compatibility)
+// ============================================================================
 
 describe('GET /health', () => {
   it('returns health status', async () => {
@@ -157,4 +212,185 @@ describe('unknown routes', () => {
     const res = await fetch(`${base}/chat`);
     expect(res.status).toBe(404);
   });
+});
+
+// ============================================================================
+// POST /v1/messages (Anthropic API-compatible endpoint)
+// ============================================================================
+
+describe('POST /v1/messages', () => {
+  it('returns Anthropic-format response for valid request', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'Say hi' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.type).toBe('message');
+    expect(body.role).toBe('assistant');
+    expect(body.model).toBe('claude-sonnet-4-5-20250929');
+    expect(body.content).toHaveLength(1);
+    expect(body.content[0].type).toBe('text');
+    expect(body.content[0].text).toBe('server test ok');
+    expect(body.stop_reason).toBe('end_turn');
+    expect(body.stop_sequence).toBeNull();
+    expect(body.usage).toBeDefined();
+    expect(body.usage.input_tokens).toBe(10);
+    expect(body.usage.output_tokens).toBe(5);
+    expect(body.id).toMatch(/^msg_/);
+  });
+
+  it('rejects missing messages with Anthropic error format', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'sonnet', max_tokens: 100 }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.type).toBe('error');
+    expect(body.error.type).toBe('invalid_request_error');
+    expect(body.error.message).toContain('messages');
+  });
+
+  it('rejects invalid JSON with Anthropic error format', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not-json{{{',
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.type).toBe('error');
+    expect(body.error.type).toBe('invalid_request_error');
+  });
+
+  it('handles multi-turn conversation', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'sonnet',
+        max_tokens: 100,
+        messages: [
+          { role: 'user', content: 'What is 2+2?' },
+          { role: 'assistant', content: '4' },
+          { role: 'user', content: 'And 3+3?' },
+        ],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.type).toBe('message');
+    expect(body.content[0].text).toBe('server test ok');
+  });
+
+  it('handles system prompt', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'sonnet',
+        max_tokens: 100,
+        system: 'You are a pirate.',
+        messages: [{ role: 'user', content: 'Hello' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.type).toBe('message');
+  });
+
+  it('returns SSE stream when stream: true', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'sonnet',
+        max_tokens: 100,
+        stream: true,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toBe('text/event-stream');
+
+    const body = await res.text();
+    expect(body).toContain('event: message_start');
+    expect(body).toContain('event: content_block_delta');
+    expect(body).toContain('event: message_stop');
+    expect(body).toContain('server test ok');
+  });
+
+  it('accepts anthropic-version header without enforcing', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'anthropic-version': '2024-99-99',
+      },
+      body: JSON.stringify({
+        model: 'sonnet',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it('works without anthropic-version header', async () => {
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'sonnet',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+});
+
+// ============================================================================
+// Auth (PROXY_API_KEY)
+// ============================================================================
+
+describe('POST /v1/messages auth', () => {
+  it('requires no auth when PROXY_API_KEY is not set', async () => {
+    // PROXY_API_KEY is not set by default in test setup
+    const res = await fetch(`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'sonnet',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }),
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  // Note: Testing PROXY_API_KEY enforcement requires the config to be loaded
+  // with the env var set. Since the test server loads config once at startup,
+  // we test the auth logic indirectly through the compat tests.
+  // A full auth integration test would require a separate server instance.
 });
