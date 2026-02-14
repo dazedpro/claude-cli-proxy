@@ -146,6 +146,7 @@ async function executeRequest(item: QueueItem, config: ProxyConfig) {
       '-p', prompt,
       '--output-format', 'json',
       '--max-turns', String(maxTurns),
+      '--permission-mode', config.permissionMode,
     ];
     if (model) args.push('--model', model);
     if (systemPrompt) args.push('--system-prompt', systemPrompt);
@@ -188,6 +189,17 @@ async function executeRequest(item: QueueItem, config: ProxyConfig) {
         const resultEntry = jsonOut.findLast((e: any) => e.type === 'result')
           ?? jsonOut.findLast((e: any) => e.type === 'assistant');
         jsonOut = resultEntry ?? jsonOut;
+      }
+
+      // Detect error_max_turns subtype (CLI returns this with no result/text field)
+      if (jsonOut.subtype === 'error_max_turns') {
+        failedRequests++;
+        log('warn', reqId, 'MAX_TURNS', { elapsedMs: Math.round(elapsedMs), maxTurns });
+        item.resolve(Response.json(
+          { text: '', error: `Reached max turns (${maxTurns}). Increase maxTurns for complex requests.` },
+          { status: 422 },
+        ));
+        return;
       }
 
       if (typeof jsonOut === 'string') {

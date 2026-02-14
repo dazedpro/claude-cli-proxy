@@ -10,6 +10,9 @@ describe('loadConfig', () => {
     delete process.env.MAX_CONCURRENT;
     delete process.env.MAX_QUEUE_DEPTH;
     delete process.env.QUEUE_TIMEOUT_MS;
+    delete process.env.DEFAULT_MAX_TURNS;
+    delete process.env.DEFAULT_TIMEOUT_MS;
+    delete process.env.PERMISSION_MODE;
   });
 
   it('returns defaults when no env vars set', () => {
@@ -17,14 +20,18 @@ describe('loadConfig', () => {
     delete process.env.MAX_CONCURRENT;
     delete process.env.MAX_QUEUE_DEPTH;
     delete process.env.QUEUE_TIMEOUT_MS;
+    delete process.env.DEFAULT_MAX_TURNS;
+    delete process.env.DEFAULT_TIMEOUT_MS;
+    delete process.env.PERMISSION_MODE;
 
     const config = loadConfig();
     expect(config.port).toBe(9100);
     expect(config.maxConcurrent).toBe(5);
     expect(config.maxQueueDepth).toBe(20);
     expect(config.queueTimeoutMs).toBe(60_000);
-    expect(config.defaultMaxTurns).toBe(2);
-    expect(config.defaultTimeoutMs).toBe(180_000);
+    expect(config.defaultMaxTurns).toBe(100);
+    expect(config.defaultTimeoutMs).toBe(600_000);
+    expect(config.permissionMode).toBe('default');
   });
 
   it('reads from environment variables', () => {
