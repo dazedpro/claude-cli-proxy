@@ -165,7 +165,7 @@ async function executeRequest(item: QueueItem, config: ProxyConfig) {
 
     if (exitCode !== 0) {
       failedRequests++;
-      log('error', reqId, 'PROC_FAIL', { elapsedMs: Math.round(elapsedMs), exitCode, stderr: stderr.slice(0, 500) });
+      log('error', reqId, 'PROC_FAIL', { elapsedMs: Math.round(elapsedMs), exitCode, stderr: stderr.slice(0, 500), stdout: stdout.slice(0, 500) });
       item.resolve(Response.json(
         { text: '', error: stderr.slice(0, 500) || `exit code ${exitCode}` },
         { status: 502 },

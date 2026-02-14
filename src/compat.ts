@@ -74,11 +74,13 @@ const MODEL_MAP: Record<string, string> = {
   'claude-sonnet-4-5-20250929': 'sonnet',
   'claude-sonnet-4-5-20241022': 'sonnet',
   'claude-haiku-4-5-20251001': 'haiku',
+  // Proxy's own model ID — let claude CLI use its default model
+  'claude-cli-proxy': '',
 };
 
 export function mapModelId(model: string): string {
-  // Direct match in map
-  if (MODEL_MAP[model]) return MODEL_MAP[model];
+  // Direct match in map (use `in` to handle empty-string values)
+  if (model in MODEL_MAP) return MODEL_MAP[model];
   // Pattern-based: claude-opus-* → opus, claude-sonnet-* → sonnet, claude-haiku-* → haiku
   if (model.startsWith('claude-opus')) return 'opus';
   if (model.startsWith('claude-sonnet')) return 'sonnet';

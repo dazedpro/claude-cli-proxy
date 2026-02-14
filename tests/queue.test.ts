@@ -192,6 +192,33 @@ describe('JSON output parsing', () => {
     expect(body.inputTokens).toBe(55);
     expect(body.outputTokens).toBe(20);
   });
+
+  it('handles array output with result event', async () => {
+    const arrayOutput = [
+      { type: 'assistant', message: 'thinking...' },
+      { type: 'result', result: 'final answer', input_tokens: 10, output_tokens: 5 },
+    ];
+    _setExecutor(mockExecutor({ stdout: JSON.stringify(arrayOutput) }));
+
+    const response = await enqueue({ prompt: 'test' }, TEST_CONFIG);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.text).toBe('final answer');
+  });
+
+  it('handles array output falling back to assistant event', async () => {
+    const arrayOutput = [
+      { type: 'assistant', text: 'assistant reply' },
+    ];
+    _setExecutor(mockExecutor({ stdout: JSON.stringify(arrayOutput) }));
+
+    const response = await enqueue({ prompt: 'test' }, TEST_CONFIG);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.text).toBe('assistant reply');
+  });
 });
 
 // ============================================================================
