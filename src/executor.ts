@@ -21,7 +21,7 @@ export async function executeClaudeCli(
   const proc = Bun.spawn([CLI_COMMAND, ...args], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDECODE: '' },
+    env: { ...process.env, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', CLAUDECODE: undefined },
   });
 
   let killed = false;

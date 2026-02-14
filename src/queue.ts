@@ -180,7 +180,16 @@ async function executeRequest(item: QueueItem, config: ProxyConfig) {
     let responseModel: string | undefined;
 
     try {
-      const jsonOut = JSON.parse(stdout.trim());
+      let jsonOut = JSON.parse(stdout.trim());
+
+      // CLI --output-format json can return an array of conversation events.
+      // Find the last "result" event or assistant message to extract the response.
+      if (Array.isArray(jsonOut)) {
+        const resultEntry = jsonOut.findLast((e: any) => e.type === 'result')
+          ?? jsonOut.findLast((e: any) => e.type === 'assistant');
+        jsonOut = resultEntry ?? jsonOut;
+      }
+
       if (typeof jsonOut === 'string') {
         responseText = jsonOut;
       } else if (jsonOut.result !== undefined) {
