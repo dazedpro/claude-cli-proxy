@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test & Typecheck
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Run tests with coverage
+        run: bun test --coverage
+
+      - name: Verify coverage threshold
+        run: |
+          # Extract overall line coverage percentage from bun test output
+          COVERAGE=$(bun test --coverage 2>&1 | grep "All files" | awk '{print $4}')
+          echo "Line coverage: ${COVERAGE}%"
+          # Fail if below 95%
+          if (( $(echo "$COVERAGE < 95" | bc -l) )); then
+            echo "::error::Line coverage ${COVERAGE}% is below 95% threshold"
+            exit 1
+          fi
